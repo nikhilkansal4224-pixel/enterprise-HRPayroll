@@ -16,13 +16,19 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const authHeader = await getAuthHeader();
   const normalizedPath = path.startsWith("/") ? path : `/${path}`;
 
+  // Assemble headers dynamically; only add Content-Type if a body exists
+  const headers: Record<string, string> = {
+    ...authHeader,
+    ...(init.headers as Record<string, string> ?? {}),
+  };
+
+  if (init.body) {
+    headers["Content-Type"] = "application/json";
+  }
+
   const res = await fetch(`${API_BASE_URL}${normalizedPath}`, {
     ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...authHeader,
-      ...(init.headers ?? {}),
-    },
+    headers,
   });
 
   const json = await res.json().catch(() => ({}));
@@ -37,8 +43,14 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 export const api = {
   get: <T>(path: string) => request<T>(path, { method: "GET" }),
   post: <T>(path: string, body?: unknown) =>
-    request<T>(path, { method: "POST", body: body ? JSON.stringify(body) : undefined }),
+    request<T>(path, {
+      method: "POST",
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    }),
   patch: <T>(path: string, body?: unknown) =>
-    request<T>(path, { method: "PATCH", body: body ? JSON.stringify(body) : undefined }),
+    request<T>(path, {
+      method: "PATCH",
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    }),
   delete: <T>(path: string) => request<T>(path, { method: "DELETE" }),
 };

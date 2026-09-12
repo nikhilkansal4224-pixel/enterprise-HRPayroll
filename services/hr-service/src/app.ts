@@ -11,10 +11,24 @@ import { ZodError } from "zod";
 export function buildApp(): FastifyInstance {
   const app = Fastify({ logger: true });
 
-  // Dynamic CORS configuration to allow local dev, explicit CORS_ORIGIN, and Vercel preview URLs
+  // Custom Content-Type parser: gracefully handles empty JSON request bodies without throwing 400
+  app.addContentTypeParser(
+    "application/json",
+    { parseAs: "string" },
+    (req, body, done) => {
+      try {
+        const json = body ? JSON.parse(body as string) : {};
+        done(null, json);
+      } catch (err: any) {
+        err.statusCode = 400;
+        done(err, undefined);
+      }
+    }
+  );
+
+  // Dynamic CORS configuration for local dev, CORS_ORIGIN env, and Vercel preview domains
   app.register(cors, {
     origin: (origin, cb) => {
-      // Allow requests with no origin (e.g., mobile apps, curl, or server-to-server)
       if (!origin) return cb(null, true);
 
       const configuredOrigins = process.env.CORS_ORIGIN
@@ -41,7 +55,7 @@ export function buildApp(): FastifyInstance {
   // Auth plugin registered before route groups so preHandler hooks apply
   app.register(authPlugin);
 
-  // Root landing route (fixes GET / 404 response)
+  // Root landing route
   app.get("/", async () => ({
     status: "online",
     service: "hr-service",
@@ -56,7 +70,7 @@ export function buildApp(): FastifyInstance {
     },
   }));
 
-  // Health check endpoint for Render/uptime services
+  // Health check endpoint for Render/uptime monitoring
   app.get("/health", async () => ({
     status: "ok",
     service: "hr-service",
