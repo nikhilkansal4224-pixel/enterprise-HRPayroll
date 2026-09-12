@@ -13,7 +13,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
   fastify.get("/me", async (request: FastifyRequest, reply: FastifyReply) => {
     const { employeeId, tenantId } = request.auth ?? {};
 
-    if (!employeeId) {
+    if (!employeeId || !tenantId) {
       return reply.code(404).send({ error: "No employee profile found for this user account" });
     }
 
@@ -33,7 +33,11 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
     "/",
     { preHandler: requireHrManager },
     async (request: FastifyRequest, reply: FastifyReply) => {
-      const { tenantId } = request.auth;
+      const { tenantId } = request.auth ?? {};
+
+      if (!tenantId) {
+        return reply.code(401).send({ error: "Unauthorized tenant request" });
+      }
 
       const payslips = await prisma.payslip.findMany({
         where: { tenantId },
@@ -60,7 +64,11 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
     { preHandler: requireHrManager },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { month, year } = calculatePayrollSchema.parse(request.body);
-      const { tenantId } = request.auth;
+      const { tenantId } = request.auth ?? {};
+
+      if (!tenantId) {
+        return reply.code(401).send({ error: "Unauthorized tenant request" });
+      }
 
       const employees = await prisma.employee.findMany({
         where: { tenantId },
@@ -126,7 +134,11 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       });
 
       const { month, year } = querySchema.parse(request.query);
-      const { tenantId } = request.auth;
+      const { tenantId } = request.auth ?? {};
+
+      if (!tenantId) {
+        return reply.code(401).send({ error: "Unauthorized tenant request" });
+      }
 
       const payslips = await prisma.payslip.findMany({
         where: { tenantId, month, year },
