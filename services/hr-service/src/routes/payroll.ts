@@ -5,6 +5,26 @@ import { prisma } from "../lib/prisma";
 import { requireHrManager } from "../plugins/auth";
 import { calculatePayroll } from "../utils/payroll-calculator";
 
+export default async function payrollRoutes(fastify: FastifyInstance) {
+  fastify.get("/me", async (request, reply) => {
+    // request.auth is populated by authPlugin
+    const { employeeId, tenantId } = request.auth ?? {};
+
+    if (!employeeId) {
+      return reply.code(404).send({ error: "No employee profile found for this user account" });
+    }
+
+    const payslips = await fastify.prisma.payslip.findMany({
+      where: {
+        employeeId,
+        tenantId,
+      },
+      orderBy: { year: "desc", month: "desc" },
+    });
+
+    return reply.send(payslips);
+  });
+}
 const calculateSchema = z.object({
   month: z.number().min(1).max(12),
   year: z.number().min(2000).max(2100),
@@ -17,22 +37,6 @@ const exportTallySchema = z.object({
   year: z.coerce.number().min(2000).max(2100),
 });
 
-export default async function payrollRoutes(fastify: FastifyInstance) {
-  /**
-   * GET /api/v1/payroll/me
-   * Employee self-service: returns the caller's own payslip history.
-   */
-  fastify.get("/me", async (request, reply) => {
-    const auth = request.auth!;
-    if (!auth.employeeId) return reply.code(400).send({ error: "No employee record linked" });
-
-    const payslips = await prisma.payslip.findMany({
-      where: { employeeId: auth.employeeId, tenantId: auth.tenantId },
-      orderBy: [{ year: "desc" }, { month: "desc" }],
-    });
-
-    return reply.send({ data: payslips });
-  });
 
   /**
    * POST /api/v1/payroll/calculate  (HR only)
