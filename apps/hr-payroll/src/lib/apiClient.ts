@@ -2,27 +2,33 @@
 
 import { supabase } from "./supabaseClient";
 
-// Clean base URL and fall back safely if process.env isn't resolved
+// Normalize the base URL by stripping any trailing slashes
 const RAW_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "https://enterprise-hrpayroll.onrender.com";
 export const API_BASE_URL = RAW_BASE_URL.replace(/\/+$/, "");
 
+/**
+ * Retrieves the current Supabase Auth access token and constructs the Authorization header.
+ */
 async function getAuthHeader(): Promise<Record<string, string>> {
   const { data } = await supabase.auth.getSession();
   const token = data.session?.access_token;
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+/**
+ * Core HTTP request runner wrapping fetch with automatic auth header injection and path normalization.
+ */
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const authHeader = await getAuthHeader();
   const normalizedPath = path.startsWith("/") ? path : `/${path}`;
 
-  // Assemble headers dynamically; only add Content-Type if a body exists
+  // Build headers dynamically; only include Content-Type when a payload body is provided
   const headers: Record<string, string> = {
     ...authHeader,
     ...(init.headers as Record<string, string> ?? {}),
   };
 
-  if (init.body) {
+  if (init.body !== undefined && init.body !== null) {
     headers["Content-Type"] = "application/json";
   }
 
