@@ -2,12 +2,12 @@
 
 import { supabase } from "./supabaseClient";
 
-// Strip trailing slashes to prevent double slashes (e.g., ...onrender.com//api/v1)
+// Clean base URL and fall back safely if process.env isn't resolved
 const RAW_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "https://enterprise-hrpayroll.onrender.com";
 export const API_BASE_URL = RAW_BASE_URL.replace(/\/+$/, "");
 
 /**
- * Retrieves the active Supabase JWT access token.
+ * Retrieves the active Supabase Auth access token and constructs the Authorization header.
  */
 async function getAuthHeader(): Promise<Record<string, string>> {
   const { data } = await supabase.auth.getSession();
@@ -22,7 +22,7 @@ async function getAuthHeader(): Promise<Record<string, string>> {
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const authHeader = await getAuthHeader();
 
-  // Clean path format and auto-prefix /api/v1 if not present
+  // Normalize path format and auto-prefix /api/v1 if not present
   let normalizedPath = path.startsWith("/") ? path : `/${path}`;
   if (!normalizedPath.startsWith("/api/v1") && !normalizedPath.startsWith("/health")) {
     normalizedPath = `/api/v1${normalizedPath}`;
