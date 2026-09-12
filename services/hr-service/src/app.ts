@@ -8,9 +8,6 @@ import claimRoutes from "./routes/claims";
 import payrollRoutes from "./routes/payroll";
 import { ZodError } from "zod";
 
-// Call with the full API version path
-const myPayroll = await api.get("/api/v1/payroll/me");
-
 export function buildApp(): FastifyInstance {
   const app = Fastify({ logger: true });
 

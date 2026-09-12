@@ -1,196 +1,165 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
-import type { AttendanceLog, Payslip } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 import { requireHrManager } from "../plugins/auth";
-import { calculatePayroll } from "../utils/payroll-calculator";
+
+const calculatePayrollSchema = z.object({
+  month: z.number().int().min(1).max(12),
+  year: z.number().int().min(2000).max(2100),
+});
 
 export default async function payrollRoutes(fastify: FastifyInstance) {
-  fastify.get("/me", async (request, reply) => {
-    // request.auth is populated by authPlugin
+  // GET /api/v1/payroll/me - Fetch payslips for authenticated employee
+  fastify.get("/me", async (request: FastifyRequest, reply: FastifyReply) => {
     const { employeeId, tenantId } = request.auth ?? {};
 
     if (!employeeId) {
       return reply.code(404).send({ error: "No employee profile found for this user account" });
     }
 
-    const payslips = await fastify.prisma.payslip.findMany({
+    const payslips = await prisma.payslip.findMany({
       where: {
         employeeId,
         tenantId,
       },
-      orderBy: { year: "desc", month: "desc" },
+      orderBy: [{ year: "desc" }, { month: "desc" }],
     });
 
     return reply.send(payslips);
   });
-}
-const calculateSchema = z.object({
-  month: z.number().min(1).max(12),
-  year: z.number().min(2000).max(2100),
-  employeeId: z.string().uuid().optional(), // omit to run for the whole tenant
-  persist: z.boolean().optional().default(true), // write payslip rows
-});
 
-const exportTallySchema = z.object({
-  month: z.coerce.number().min(1).max(12),
-  year: z.coerce.number().min(2000).max(2100),
-});
+  // GET /api/v1/payroll - Fetch all tenant payslips (HR Manager only)
+  fastify.get(
+    "/",
+    { preHandler: requireHrManager },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { tenantId } = request.auth;
 
+      const payslips = await prisma.payslip.findMany({
+        where: { tenantId },
+        include: {
+          employee: {
+            select: {
+              firstName: true,
+              lastName: true,
+              employeeCode: true,
+              email: true,
+            },
+          },
+        },
+        orderBy: [{ year: "desc" }, { month: "desc" }],
+      });
 
-  /**
-   * POST /api/v1/payroll/calculate  (HR only)
-   * Calculates payroll for one employee, or the whole tenant if `employeeId`
-   * is omitted. Persists results to `payslips` unless `persist: false`.
-   */
+      return reply.send(payslips);
+    }
+  );
+
+  // POST /api/v1/payroll/calculate - Bulk generate payslips (HR Manager only)
   fastify.post(
     "/calculate",
     { preHandler: requireHrManager },
-    async (request, reply) => {
-      const auth = request.auth!;
-      const body = calculateSchema.parse(request.body);
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { month, year } = calculatePayrollSchema.parse(request.body);
+      const { tenantId } = request.auth;
 
       const employees = await prisma.employee.findMany({
-        where: {
-          tenantId: auth.tenantId,
-          ...(body.employeeId ? { id: body.employeeId } : {}),
-        },
+        where: { tenantId },
       });
 
       if (employees.length === 0) {
-        return reply.code(404).send({ error: "No matching employee(s) found for this tenant" });
+        return reply.code(400).send({ error: "No active employees found for payroll calculation" });
       }
 
-      const monthStart = new Date(body.year, body.month - 1, 1);
-      const monthEnd = new Date(body.year, body.month, 1);
-
-      const results = [];
+      const generatedPayslips = [];
 
       for (const emp of employees) {
-        const logs = await prisma.attendanceLog.findMany({
-          where: { employeeId: emp.id, logDate: { gte: monthStart, lt: monthEnd } },
-        });
+        const grossEarnings = Number(emp.baseSalary);
+        const pfDeduction = Math.round(grossEarnings * 0.12 * 100) / 100;
+        const tdsDeduction = Math.round(grossEarnings * 0.05 * 100) / 100;
+        const netPayable = grossEarnings - pfDeduction - tdsDeduction;
 
-        const absentDays = logs.filter((l: AttendanceLog) => l.status === "ABSENT").length;
-        const halfDays = logs.filter((l: AttendanceLog) => l.status === "HALF_DAY").length;
-
-        const payroll = calculatePayroll({
-          baseSalary: Number(emp.baseSalary),
-          month: body.month,
-          year: body.year,
-          absentDays,
-          halfDays,
-        });
-
-        let payslipId: string | undefined;
-
-        if (body.persist) {
-          const payslip = await prisma.payslip.upsert({
-            where: { employeeId_month_year: { employeeId: emp.id, month: body.month, year: body.year } },
-            update: {
-              grossEarnings: payroll.grossEarnings,
-              pfDeduction: payroll.pfDeduction,
-              tdsDeduction: payroll.tdsDeduction,
-              netPayable: payroll.netPayable,
-              generatedAt: new Date(),
-            },
-            create: {
-              tenantId: auth.tenantId,
+        const payslip = await prisma.payslip.upsert({
+          where: {
+            employeeId_month_year: {
               employeeId: emp.id,
-              month: body.month,
-              year: body.year,
-              grossEarnings: payroll.grossEarnings,
-              pfDeduction: payroll.pfDeduction,
-              tdsDeduction: payroll.tdsDeduction,
-              netPayable: payroll.netPayable,
+              month,
+              year,
             },
-          });
-          payslipId = payslip.id;
-        }
-
-        results.push({
-          employeeId: emp.id,
-          employeeCode: emp.employeeCode,
-          name: `${emp.firstName} ${emp.lastName}`,
-          payslipId,
-          ...payroll,
+          },
+          update: {
+            grossEarnings,
+            pfDeduction,
+            tdsDeduction,
+            netPayable,
+            generatedAt: new Date(),
+          },
+          create: {
+            tenantId,
+            employeeId: emp.id,
+            month,
+            year,
+            grossEarnings,
+            pfDeduction,
+            tdsDeduction,
+            netPayable,
+          },
         });
+
+        generatedPayslips.push(payslip);
       }
 
-      return reply.send({ data: results });
+      return reply.code(200).send({
+        message: `Successfully calculated payroll for ${generatedPayslips.length} employees`,
+        payslips: generatedPayslips,
+      });
     }
   );
 
-  /**
-   * GET /api/v1/payroll/export-tally?month=&year=  (HR only)
-   * Produces a read-only JSON payload summarizing finalized payroll journals
-   * for the month: Salaries Payable, PF liability, and TDS liability — the
-   * three ledger heads a CA typically needs to post/import into Tally.
-   */
+  // GET /api/v1/payroll/export-tally - Export data for accounting (HR Manager only)
   fastify.get(
     "/export-tally",
     { preHandler: requireHrManager },
-    async (request, reply) => {
-      const auth = request.auth!;
-      const query = exportTallySchema.parse(request.query);
-
-      const payslips = await prisma.payslip.findMany({
-        where: { tenantId: auth.tenantId, month: query.month, year: query.year },
-        include: { employee: { select: { employeeCode: true, firstName: true, lastName: true, department: true } } },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const querySchema = z.object({
+        month: z.coerce.number().int().min(1).max(12),
+        year: z.coerce.number().int().min(2000).max(2100),
       });
 
-      if (payslips.length === 0) {
-        return reply.code(404).send({ error: "No finalized payslips found for this period" });
-      }
+      const { month, year } = querySchema.parse(request.query);
+      const { tenantId } = request.auth;
 
-      type PayslipWithEmployee = Payslip & {
-        employee: { employeeCode: string; firstName: string; lastName: string; department: string | null };
-      };
-
-      const totals = payslips.reduce(
-        (acc: { grossEarnings: number; pf: number; tds: number; netPayable: number }, p: PayslipWithEmployee) => {
-          acc.grossEarnings += Number(p.grossEarnings);
-          acc.pf += Number(p.pfDeduction);
-          acc.tds += Number(p.tdsDeduction);
-          acc.netPayable += Number(p.netPayable);
-          return acc;
+      const payslips = await prisma.payslip.findMany({
+        where: { tenantId, month, year },
+        include: {
+          employee: {
+            select: {
+              employeeCode: true,
+              firstName: true,
+              lastName: true,
+              pfNumber: true,
+              panNumber: true,
+            },
+          },
         },
-        { grossEarnings: 0, pf: 0, tds: 0, netPayable: 0 }
-      );
+      });
 
-      const payload = {
-        tenantId: auth.tenantId,
-        period: { month: query.month, year: query.year },
-        generatedAt: new Date().toISOString(),
-        ledgerSummary: {
-          salariesPayable: round2(totals.netPayable),
-          pfLiability: round2(totals.pf),
-          tdsLiability: round2(totals.tds),
-          grossSalaryExpense: round2(totals.grossEarnings),
-        },
-        journalLines: [
-          { ledger: "Salary Expense (Dr)", amount: round2(totals.grossEarnings) },
-          { ledger: "PF Payable (Cr)", amount: round2(totals.pf) },
-          { ledger: "TDS Payable (Cr)", amount: round2(totals.tds) },
-          { ledger: "Salaries Payable / Bank (Cr)", amount: round2(totals.netPayable) },
-        ],
-        employeeBreakdown: payslips.map((p: PayslipWithEmployee) => ({
-          employeeCode: p.employee.employeeCode,
-          name: `${p.employee.firstName} ${p.employee.lastName}`,
-          department: p.employee.department,
-          grossEarnings: Number(p.grossEarnings),
-          pfDeduction: Number(p.pfDeduction),
-          tdsDeduction: Number(p.tdsDeduction),
-          netPayable: Number(p.netPayable),
-        })),
-        note:
-          "This export is a read-only summary for CA review prior to Tally ingestion. It does not post entries automatically.",
-      };
+      const exportData = payslips.map((p) => ({
+        employee_code: p.employee.employeeCode,
+        employee_name: `${p.employee.firstName} ${p.employee.lastName}`,
+        pf_number: p.employee.pfNumber ?? "N/A",
+        pan_number: p.employee.panNumber ?? "N/A",
+        month: p.month,
+        year: p.year,
+        gross_earnings: Number(p.grossEarnings),
+        pf_deduction: Number(p.pfDeduction),
+        tds_deduction: Number(p.tdsDeduction),
+        net_payable: Number(p.netPayable),
+      }));
 
-      return reply.send({ data: payload });
+      return reply.send({
+        period: `${month}/${year}`,
+        records: exportData,
+      });
     }
   );
-
-function round2(n: number): number {
-  return Math.round(n * 100) / 100;
 }
