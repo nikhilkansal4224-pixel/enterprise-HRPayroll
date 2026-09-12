@@ -2,12 +2,12 @@
 
 import { supabase } from "./supabaseClient";
 
-// Normalize the base URL by stripping any trailing slashes
+// Strip trailing slashes to prevent double slashes (e.g., ...onrender.com//api/v1)
 const RAW_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "https://enterprise-hrpayroll.onrender.com";
 export const API_BASE_URL = RAW_BASE_URL.replace(/\/+$/, "");
 
 /**
- * Retrieves the current Supabase Auth access token and constructs the Authorization header.
+ * Retrieves the active Supabase JWT access token.
  */
 async function getAuthHeader(): Promise<Record<string, string>> {
   const { data } = await supabase.auth.getSession();
@@ -16,13 +16,19 @@ async function getAuthHeader(): Promise<Record<string, string>> {
 }
 
 /**
- * Core HTTP request runner wrapping fetch with automatic auth header injection and path normalization.
+ * Core HTTP client. Automatically appends /api/v1 prefix if missing,
+ * injects Bearer JWT, and controls Content-Type header injection.
  */
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const authHeader = await getAuthHeader();
-  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
 
-  // Build headers dynamically; only include Content-Type when a payload body is provided
+  // Clean path format and auto-prefix /api/v1 if not present
+  let normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  if (!normalizedPath.startsWith("/api/v1") && !normalizedPath.startsWith("/health")) {
+    normalizedPath = `/api/v1${normalizedPath}`;
+  }
+
+  // Construct headers cleanly
   const headers: Record<string, string> = {
     ...authHeader,
     ...(init.headers as Record<string, string> ?? {}),
