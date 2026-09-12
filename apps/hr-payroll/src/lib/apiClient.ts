@@ -10,11 +10,21 @@ export const API_BASE_URL = RAW_BASE_URL.replace(/\/+$/, "");
  * Retrieves the active Supabase Auth access token and constructs the Authorization header.
  */
 async function getAuthHeader(): Promise<Record<string, string>> {
-  const { data } = await supabase.auth.getSession();
-  const token = data.session?.access_token;
-  return token ? { Authorization: `Bearer ${token}` } : {};
-}
+  let { data: { session } } = await supabase.auth.getSession();
 
+  // If session isn't loaded yet, attempt to retrieve refreshed session
+  if (!session) {
+    const { data: refreshed } = await supabase.auth.refreshSession();
+    session = refreshed.session;
+  }
+
+  const token = session?.access_token;
+  if (!token) {
+    throw new Error("User is not authenticated. Missing access token.");
+  }
+
+  return { Authorization: `Bearer ${token}` };
+}
 /**
  * Core HTTP client. Automatically appends /api/v1 prefix if missing,
  * injects Bearer JWT, and controls Content-Type header injection.
