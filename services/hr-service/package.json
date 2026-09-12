@@ -24,10 +24,10 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
-    "@types/node": "^20.19.43",
-    "prisma": "^5.19.1",
     "tsx": "^4.19.0",
-    "typescript": "^5.5.4"
+    "@types/node": "^20.0.0",
+    "prisma": "^5.22.0",
+    "typescript": "^5.0.0"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
