@@ -2,23 +2,25 @@
 
 import { supabase } from "./supabaseClient";
 
+// Clean base URL and fall back safely if process.env isn't resolved
 const RAW_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "https://enterprise-hrpayroll.onrender.com";
 export const API_BASE_URL = RAW_BASE_URL.replace(/\/+$/, "");
 
 /**
  * Retrieves the active Supabase Auth access token.
- * Retries retrieving or refreshing the session once if uninitialized.
+ * Attempts a session refresh if initially uninitialized, throwing an error if unauthenticated.
  */
 async function getAuthHeader(): Promise<Record<string, string>> {
   let { data: { session } } = await supabase.auth.getSession();
 
-  // Retry retrieving/refreshing session if initially null
+  // Retry retrieving/refreshing the session if initially null
   if (!session) {
     const { data: refreshed } = await supabase.auth.refreshSession();
     session = refreshed.session;
   }
 
   const token = session?.access_token;
+
   if (!token) {
     throw new Error("User is not authenticated. Missing access token.");
   }
@@ -26,19 +28,29 @@ async function getAuthHeader(): Promise<Record<string, string>> {
   return { Authorization: `Bearer ${token}` };
 }
 
+/**
+ * Core HTTP client. Automatically appends /api/v1 prefix if missing,
+ * injects Bearer JWT using standard Headers API, and handles JSON payloads.
+ */
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  // Normalize path format and auto-prefix /api/v1 if not present
   let normalizedPath = path.startsWith("/") ? path : `/${path}`;
   if (!normalizedPath.startsWith("/api/v1") && !normalizedPath.startsWith("/health")) {
     normalizedPath = `/api/v1${normalizedPath}`;
   }
 
+  // Use standard Headers API to handle overrides cleanly
   const headers = new Headers(init.headers);
 
-  // Skip token injection for public endpoints like health checks
+  // Exclude auth headers for public health checks if applicable
   if (!normalizedPath.startsWith("/health")) {
-    const authHeader = await getAuthHeader();
-    if (authHeader.Authorization) {
-      headers.set("Authorization", authHeader.Authorization);
+    try {
+      const authHeader = await getAuthHeader();
+      if (authHeader.Authorization) {
+        headers.set("Authorization", authHeader.Authorization);
+      }
+    } catch (err) {
+      console.warn("Skipping Authorization header:", (err as Error).message);
     }
   }
 
