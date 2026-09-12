@@ -190,7 +190,6 @@ const exportTallySchema = z.object({
       return reply.send({ data: payload });
     }
   );
-}
 
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
