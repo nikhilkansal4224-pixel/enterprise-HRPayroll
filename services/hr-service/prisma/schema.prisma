@@ -1,0 +1,178 @@
+// Prisma schema for the HR & Payroll System
+// Target database: Supabase Postgres
+// NOTE: Row-Level Security (RLS) policies are NOT managed by Prisma — they live in
+// supabase/migrations/0001_init.sql and are applied directly via `supabase db push`
+// or the Supabase SQL editor. Prisma is used here purely for typed application-side
+// data access (via the pooled DATABASE_URL, service-role context on the backend).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+  HALF_DAY
+
+  @@map("attendance_status")
+}
+
+enum LeaveType {
+  SICK
+  CASUAL
+  EARNED
+
+  @@map("leave_type")
+}
+
+enum LeaveStatus {
+  PENDING
+  APPROVED
+  REJECTED
+
+  @@map("leave_status")
+}
+
+enum ClaimStatus {
+  PENDING
+  APPROVED
+  REJECTED
+
+  @@map("claim_status")
+}
+
+enum UserRole {
+  EMPLOYEE
+  HR_MANAGER
+
+  @@map("user_role")
+}
+
+// ---------------------------------------------------------------------------
+// Models
+// ---------------------------------------------------------------------------
+
+/// Maps a Supabase auth.users row to a tenant + role. Used by the auth plugin
+/// on the backend, and referenced by RLS policies in Postgres.
+model UserRoleAssignment {
+  id        String   @id @default(uuid()) @db.Uuid
+  tenantId  String   @map("tenant_id") @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  role      UserRole @default(EMPLOYEE)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([tenantId, userId])
+  @@index([userId])
+  @@map("user_roles")
+}
+
+model Employee {
+  id           String   @id @default(uuid()) @db.Uuid
+  tenantId     String   @map("tenant_id") @db.Uuid
+  userId       String   @map("user_id") @db.Uuid // references auth.users(id)
+  employeeCode String   @map("employee_code")
+  firstName    String   @map("first_name")
+  lastName     String   @map("last_name")
+  email        String
+  department   String?
+  designation  String?
+  baseSalary   Decimal  @map("base_salary") @db.Decimal(12, 2)
+  pfNumber     String?  @map("pf_number")
+  panNumber    String?  @map("pan_number")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  attendanceLogs AttendanceLog[]
+  leaveRequests  LeaveRequest[]
+  expenseClaims  ExpenseClaim[]
+  payslips       Payslip[]
+
+  @@unique([tenantId, employeeCode])
+  @@index([tenantId])
+  @@index([userId])
+  @@map("employees")
+}
+
+model AttendanceLog {
+  id             String           @id @default(uuid()) @db.Uuid
+  tenantId       String           @map("tenant_id") @db.Uuid
+  employeeId     String           @map("employee_id") @db.Uuid
+  logDate        DateTime         @map("log_date") @db.Date
+  checkIn        DateTime?        @map("check_in") @db.Timestamptz()
+  checkOut       DateTime?        @map("check_out") @db.Timestamptz()
+  status         AttendanceStatus @default(PRESENT)
+  overtimeHours  Decimal          @default(0) @map("overtime_hours") @db.Decimal(5, 2)
+  createdAt      DateTime         @default(now()) @map("created_at")
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@unique([employeeId, logDate])
+  @@index([tenantId])
+  @@index([employeeId, logDate])
+  @@map("attendance_logs")
+}
+
+model LeaveRequest {
+  id         String      @id @default(uuid()) @db.Uuid
+  tenantId   String      @map("tenant_id") @db.Uuid
+  employeeId String      @map("employee_id") @db.Uuid
+  leaveType  LeaveType   @map("leave_type")
+  startDate  DateTime    @map("start_date") @db.Date
+  endDate    DateTime    @map("end_date") @db.Date
+  totalDays  Decimal     @map("total_days") @db.Decimal(4, 1)
+  reason     String?
+  status     LeaveStatus @default(PENDING)
+  approvedBy String?     @map("approved_by") @db.Uuid
+  createdAt  DateTime    @default(now()) @map("created_at")
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([employeeId])
+  @@map("leave_requests")
+}
+
+model ExpenseClaim {
+  id                String      @id @default(uuid()) @db.Uuid
+  tenantId          String      @map("tenant_id") @db.Uuid
+  employeeId        String      @map("employee_id") @db.Uuid
+  claimType         String      @map("claim_type")
+  amount            Decimal     @db.Decimal(12, 2)
+  proofDocumentUrl  String?     @map("proof_document_url")
+  status            ClaimStatus @default(PENDING)
+  createdAt         DateTime    @default(now()) @map("created_at")
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([employeeId])
+  @@map("expense_claims")
+}
+
+model Payslip {
+  id            String   @id @default(uuid()) @db.Uuid
+  tenantId      String   @map("tenant_id") @db.Uuid
+  employeeId    String   @map("employee_id") @db.Uuid
+  month         Int
+  year          Int
+  grossEarnings Decimal  @map("gross_earnings") @db.Decimal(12, 2)
+  pfDeduction   Decimal  @map("pf_deduction") @db.Decimal(12, 2)
+  tdsDeduction  Decimal  @map("tds_deduction") @db.Decimal(12, 2)
+  netPayable    Decimal  @map("net_payable") @db.Decimal(12, 2)
+  generatedAt   DateTime @default(now()) @map("generated_at")
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@unique([employeeId, month, year])
+  @@index([tenantId])
+  @@map("payslips")
+}

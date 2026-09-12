@@ -1,0 +1,26 @@
+{
+  "name": "repo-hr-payroll",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Multi-tenant HR & Payroll System — Fastify/TypeScript backend + Next.js frontend on Supabase",
+  "workspaces": [
+    "services/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev:api": "npm run dev --workspace=services/hr-service",
+    "dev:web": "npm run dev --workspace=apps/hr-payroll",
+    "build:api": "npm run build --workspace=services/hr-service",
+    "build:web": "npm run build --workspace=apps/hr-payroll",
+    "prisma:generate": "npm run prisma:generate --workspace=services/hr-service",
+    "prisma:migrate": "npm run prisma:migrate --workspace=services/hr-service",
+    "prisma:seed": "npm run prisma:seed --workspace=services/hr-service",
+    "lint": "npm run lint --workspace=services/hr-service && npm run lint --workspace=apps/hr-payroll"
+  },
+  "engines": {
+    "node": ">=18.18.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.4"
+  }
+}
