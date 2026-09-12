@@ -11,10 +11,29 @@ import { ZodError } from "zod";
 export function buildApp(): FastifyInstance {
   const app = Fastify({ logger: true });
 
-  // CORS configuration for local dev and production Vercel frontend
+  // Dynamic CORS configuration to allow local dev, explicit CORS_ORIGIN, and Vercel preview URLs
   app.register(cors, {
-    origin: process.env.CORS_ORIGIN?.split(",") ?? true,
+    origin: (origin, cb) => {
+      // Allow requests with no origin (e.g., mobile apps, curl, or server-to-server)
+      if (!origin) return cb(null, true);
+
+      const configuredOrigins = process.env.CORS_ORIGIN
+        ? process.env.CORS_ORIGIN.split(",").map((o) => o.trim())
+        : [];
+
+      const isAllowed =
+        configuredOrigins.includes(origin) ||
+        origin.endsWith(".vercel.app") ||
+        origin.includes("localhost");
+
+      if (isAllowed) {
+        cb(null, true);
+      } else {
+        cb(new Error("Not allowed by CORS"), false);
+      }
+    },
     credentials: true,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   });
 
   app.register(sensible);
